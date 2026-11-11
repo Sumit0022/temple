@@ -1,0 +1,506 @@
+// This is your Prisma schema file for the Temple Management System (TMS)
+// Configured with SQLite for out-of-the-box local operation and 100% portable to PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// USER & RBAC (ADMIN & STAFF)
+// -------------------------------------------------------------
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("GENERAL_STAFF") // SUPER_ADMIN, TEMPLE_ADMIN, ACCOUNTANT, DONATION_MANAGER, STORE_MANAGER, INVENTORY_MANAGER, EVENT_MANAGER, SEVA_MANAGER, GENERAL_STAFF
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdDonations   Donation[]          @relation("StaffCreatedDonations")
+  recordedExpenses   Expense[]           @relation("StaffRecordedExpenses")
+  approvedExpenses   Expense[]           @relation("StaffApprovedExpenses")
+  inventoryMovements InventoryMovement[] @relation("StaffInventoryMovements")
+  auditLogs          AuditLog[]
+}
+
+// -------------------------------------------------------------
+// DEVOTEE (PUBLIC USERS)
+// -------------------------------------------------------------
+model Devotee {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?  @unique
+  phone        String
+  passwordHash String?
+  gotra        String?
+  nakshatra    String?
+  rashi        String?
+  address      String?
+  city         String?
+  state        String?
+  pincode      String?
+  panNumber    String?
+  isGuest      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  donations          Donation[]
+  orders             Order[]
+  sevaBookings       SevaBooking[]
+  eventRegistrations EventRegistration[]
+}
+
+// -------------------------------------------------------------
+// DONATIONS & RECEIPTS
+// -------------------------------------------------------------
+model DonationCategory {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  nameHi        String
+  code          String   @unique
+  description   String?
+  descriptionHi String?
+  icon          String?  // lucide icon name
+  isTaxExempt   Boolean  @default(false)
+  minAmount     Float    @default(51.0)
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  donations Donation[]
+}
+
+model Donation {
+  id                 String   @id @default(cuid())
+  receiptNumber      String   @unique
+  devoteeId          String?
+  donorName          String
+  donorEmail         String?
+  donorPhone         String
+  donorAddress       String?
+  donorPan           String?
+  gotra              String?
+  isAnonymous        Boolean  @default(false)
+  categoryId         String
+  amount             Float
+  paymentMethod      String   @default("ONLINE") // ONLINE, CASH, UPI, CHEQUE, BANK_TRANSFER
+  paymentStatus      String   @default("PENDING") // PENDING, SUCCESS, FAILED, REFUNDED
+  paymentGatewayRef  String?  // Razorpay Payment ID
+  gatewayOrderId     String?  // Razorpay Order ID
+  gatewaySignature   String?
+  transactionId      String?  @unique
+  receiptUrl         String?
+  isTaxExempt80G     Boolean  @default(false)
+  tax80GNumber       String?
+  notes              String?
+  createdByUserId    String?  // Staff who recorded offline donation
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  category      DonationCategory @relation(fields: [categoryId], references: [id])
+  devotee       Devotee?         @relation(fields: [devoteeId], references: [id])
+  createdByUser User?            @relation("StaffCreatedDonations", fields: [createdByUserId], references: [id])
+}
+
+// -------------------------------------------------------------
+// PRASAD & DEVOTIONAL STORE (E-COMMERCE)
+// -------------------------------------------------------------
+model ProductCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  nameHi      String
+  slug        String   @unique
+  description String?
+  image       String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id                String   @id @default(cuid())
+  categoryId        String
+  name              String
+  nameHi            String
+  slug              String   @unique
+  description       String
+  descriptionHi     String?
+  images            String   // JSON stringified array of image URLs
+  price             Float
+  salePrice         Float?
+  sku               String   @unique
+  stockQuantity     Int      @default(0)
+  minStockThreshold Int      @default(5)
+  isPrasad          Boolean  @default(true)
+  shelfLifeDays     Int?     // For fresh prasad
+  expiryDate        DateTime?
+  isActive          Boolean  @default(true)
+  isFeatured        Boolean  @default(false)
+  weightGrams       Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  category           ProductCategory     @relation(fields: [categoryId], references: [id])
+  orderItems         OrderItem[]
+  inventoryMovements InventoryMovement[]
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  orderNumber     String   @unique
+  devoteeId       String?
+  customerName    String
+  customerEmail   String
+  customerPhone   String
+  deliveryType    String   @default("PICKUP") // PICKUP, HOME_DELIVERY
+  shippingAddress String?
+  shippingCity    String?
+  shippingState   String?
+  shippingPincode String?
+  shippingCost    Float    @default(0.0)
+  subtotal        Float
+  discount        Float    @default(0.0)
+  totalAmount     Float
+  paymentMethod   String   @default("ONLINE") // ONLINE, CASH_ON_PICKUP
+  paymentStatus   String   @default("PENDING") // PENDING, PAID, FAILED, REFUNDED
+  orderStatus     String   @default("PENDING") // PENDING, CONFIRMED, PROCESSING, READY_FOR_PICKUP, SHIPPED, DELIVERED, CANCELLED, REFUNDED
+  gatewayOrderId  String?
+  gatewayPaymentId String?
+  trackingNumber  String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  devotee    Devotee?    @relation(fields: [devoteeId], references: [id])
+  orderItems OrderItem[]
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String
+  productName String
+  price       Float
+  quantity    Int
+  totalAmount Float
+  createdAt   DateTime @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+// -------------------------------------------------------------
+// INVENTORY & SUPPLIES MANAGEMENT
+// -------------------------------------------------------------
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String
+  contactPerson String?
+  email         String?
+  phone         String
+  address       String?
+  gstin         String?
+  notes         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  inventoryItems InventoryItem[]
+  expenses       Expense[]
+}
+
+model InventoryItem {
+  id            String   @id @default(cuid())
+  name          String
+  category      String   // PRASAD_RAW_MATERIAL, PUJA_SAMAGRI, STORE_MERCHANDISE, GENERAL_SUPPLY
+  sku           String   @unique
+  unit          String   @default("units") // kg, packets, litres, pieces, boxes
+  currentStock  Float    @default(0)
+  minStockAlert Float    @default(10)
+  unitCost      Float    @default(0)
+  supplierId    String?
+  location      String?  // Storage room/shelf
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  supplier  Supplier?           @relation(fields: [supplierId], references: [id])
+  movements InventoryMovement[]
+}
+
+model InventoryMovement {
+  id                   String   @id @default(cuid())
+  inventoryItemId      String?
+  productId            String?
+  movementType         String   // IN_PURCHASE, OUT_SALE, OUT_PRASAD_SEVA, ADJUSTMENT, DAMAGED_EXPIRED
+  quantity             Float
+  previousStock        Float
+  newStock             Float
+  unitCost             Float?
+  reason               String?
+  referenceOrderNumber String?
+  recordedByUserId     String?
+  createdAt            DateTime @default(now())
+
+  inventoryItem  InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  product        Product?       @relation(fields: [productId], references: [id])
+  recordedByUser User?          @relation("StaffInventoryMovements", fields: [recordedByUserId], references: [id])
+}
+
+// -------------------------------------------------------------
+// ACCOUNTS & FINANCIAL MANAGEMENT
+// -------------------------------------------------------------
+model ExpenseCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  expenses Expense[]
+}
+
+model Expense {
+  id               String   @id @default(cuid())
+  voucherNumber    String   @unique
+  categoryId       String
+  title            String
+  amount           Float
+  paymentMethod    String   @default("BANK_TRANSFER") // CASH, BANK_TRANSFER, UPI, CHEQUE
+  paymentStatus    String   @default("PAID") // PAID, PENDING
+  supplierId       String?
+  paidTo           String
+  paidDate         DateTime @default(now())
+  invoiceRef       String?
+  receiptUrl       String?
+  notes            String?
+  approvedByUserId String?
+  recordedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  category         ExpenseCategory @relation(fields: [categoryId], references: [id])
+  supplier         Supplier?       @relation(fields: [supplierId], references: [id])
+  approvedByUser   User?           @relation("StaffApprovedExpenses", fields: [approvedByUserId], references: [id])
+  recordedByUser   User?           @relation("StaffRecordedExpenses", fields: [recordedByUserId], references: [id])
+}
+
+model FinancialTransaction {
+  id                String   @id @default(cuid())
+  transactionNumber String   @unique
+  type              String   // INCOME, EXPENSE
+  source            String   // DONATION, PRASAD_SALE, SEVA_BOOKING, OPERATIONAL_EXPENSE, VENDOR_PAYMENT, OTHER
+  amount            Float
+  paymentMethod     String   // CASH, UPI, ONLINE, BANK_TRANSFER, CHEQUE
+  referenceId       String?  // Reference ID of donation/order/expense
+  referenceType     String?  // "Donation", "Order", "Expense", "SevaBooking"
+  description       String
+  status            String   @default("COMPLETED") // COMPLETED, PENDING, CANCELLED, REFUNDED
+  transactionDate   DateTime @default(now())
+  recordedByUserId  String?
+  createdAt         DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// PUJA & SEVA BOOKING MANAGEMENT
+// -------------------------------------------------------------
+model SevaCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  nameHi      String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sevas Seva[]
+}
+
+model Seva {
+  id                String   @id @default(cuid())
+  categoryId        String
+  name              String
+  nameHi            String
+  code              String   @unique
+  description       String
+  descriptionHi     String?
+  deityName         String   @default("Shri Ram / Mahadev")
+  price             Float
+  durationMinutes   Int      @default(30)
+  maxBookingsPerDay Int      @default(10)
+  timings           String   // e.g. "07:00 AM, 09:30 AM, 04:00 PM"
+  includesPrasad    Boolean  @default(true)
+  isSpecialDarshan  Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  isFeatured        Boolean  @default(false)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  category SevaCategory  @relation(fields: [categoryId], references: [id])
+  bookings SevaBooking[]
+}
+
+model SevaBooking {
+  id                  String   @id @default(cuid())
+  bookingNumber       String   @unique
+  sevaId              String
+  devoteeId           String?
+  devoteeName         String
+  devoteePhone        String
+  devoteeEmail        String?
+  gotra               String?
+  nakshatra           String?
+  rashi               String?
+  sankalpa            String?
+  familyMembers       String?  // JSON string or comma-separated names
+  bookingDate         DateTime
+  bookingTimeSlot     String
+  numberOfPeople      Int      @default(1)
+  totalAmount         Float
+  paymentMethod       String   @default("ONLINE")
+  paymentStatus       String   @default("PENDING") // PENDING, CONFIRMED, FAILED, REFUNDED
+  bookingStatus       String   @default("CONFIRMED") // CONFIRMED, ATTENDED, CANCELLED
+  gatewayOrderId      String?
+  gatewayPaymentId    String?
+  specialInstructions String?
+  qrCodeHash          String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  seva    Seva     @relation(fields: [sevaId], references: [id])
+  devotee Devotee? @relation(fields: [devoteeId], references: [id])
+}
+
+// -------------------------------------------------------------
+// EVENTS & FESTIVALS
+// -------------------------------------------------------------
+model Event {
+  id                     String   @id @default(cuid())
+  title                  String
+  titleHi                String
+  slug                   String   @unique
+  description            String
+  descriptionHi          String?
+  bannerImage            String?
+  startDate              DateTime
+  endDate                DateTime
+  location               String   @default("Main Temple Sanctum")
+  isRegistrationRequired Boolean  @default(false)
+  maxAttendees           Int?
+  isPublished            Boolean  @default(true)
+  isFeatured             Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  registrations EventRegistration[]
+}
+
+model EventRegistration {
+  id               String   @id @default(cuid())
+  eventId          String
+  devoteeId        String?
+  devoteeName      String
+  devoteePhone     String
+  devoteeEmail     String?
+  numberOfGuests   Int      @default(1)
+  registrationDate DateTime @default(now())
+  status           String   @default("REGISTERED") // REGISTERED, ATTENDED, CANCELLED
+  createdAt        DateTime @default(now())
+
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  devotee Devotee? @relation(fields: [devoteeId], references: [id])
+}
+
+// -------------------------------------------------------------
+// MULTIMEDIA GALLERY
+// -------------------------------------------------------------
+model GalleryAlbum {
+  id          String   @id @default(cuid())
+  title       String
+  titleHi     String
+  slug        String   @unique
+  description String?
+  coverImage  String?
+  category    String   @default("FESTIVAL") // FESTIVAL, DAILY_DARSHAN, RITUAL, RENOVATION, CHARITY
+  isPublished Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  mediaAssets MediaAsset[]
+}
+
+model MediaAsset {
+  id           String   @id @default(cuid())
+  albumId      String
+  title        String?
+  caption      String?
+  mediaType    String   @default("IMAGE") // IMAGE, VIDEO
+  url          String
+  thumbnailUrl String?
+  sortOrder    Int      @default(0)
+  isFeatured   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  album GalleryAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// ANNOUNCEMENTS & NEWS
+// -------------------------------------------------------------
+model Announcement {
+  id        String    @id @default(cuid())
+  title     String
+  titleHi   String
+  message   String
+  messageHi String?
+  type      String    @default("INFO") // INFO, FESTIVAL_SPECIAL, WARNING, EMERGENCY
+  isActive  Boolean   @default(true)
+  isBanner  Boolean   @default(false)
+  startDate DateTime?
+  endDate   DateTime?
+  priority  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// -------------------------------------------------------------
+// SYSTEM SETTINGS & AUDIT LOGS
+// -------------------------------------------------------------
+model TempleSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  group       String   @default("GENERAL") // GENERAL, BRANDING, CONTACT, PAYMENTS, TAX, STORE, DARSHAN
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // e.g. "RECORD_OFFLINE_DONATION", "UPDATE_ORDER_STATUS", "DISPATCH_STOCK"
+  entity    String   // e.g. "Donation", "Order", "Product", "User"
+  entityId  String?
+  details   String?  // JSON string
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
